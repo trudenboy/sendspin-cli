@@ -63,7 +63,7 @@ class SendspinDaemon:
         self._client: SendspinClient | None = None
         self._listener: ClientListener | None = None
         self._audio_handler: AudioStreamHandler | None = None
-        self._settings: ClientSettings | None = None
+        self._settings = args.settings
         self._mpris: SendspinMpris | None = None
         self._static_delay_ms: float = 0.0
         self._connection_lock: asyncio.Lock | None = None
@@ -91,6 +91,8 @@ class SendspinDaemon:
                 supported_commands=[PlayerCommand.VOLUME, PlayerCommand.MUTE],
             ),
             static_delay_ms=static_delay_ms,
+            initial_volume=self._settings.player_volume,
+            initial_muted=self._settings.player_muted,
         )
 
     async def run(self) -> int:
@@ -110,8 +112,6 @@ class SendspinDaemon:
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(signal.SIGINT, signal_handler)
             loop.add_signal_handler(signal.SIGTERM, signal_handler)
-
-        self._settings = self._args.settings
 
         # CLI arg overrides settings for static delay
         delay = (
@@ -236,7 +236,6 @@ class SendspinDaemon:
 
             try:
                 await client.attach_websocket(ws)
-                self._audio_handler.send_player_volume()
             except TimeoutError:
                 logger.warning("Handshake with server timed out")
                 await self._stop_mpris_and_audio()
@@ -276,7 +275,6 @@ class SendspinDaemon:
         while True:
             try:
                 await self._client.connect(url)
-                self._audio_handler.send_player_volume()
                 error_backoff = 1.0
 
                 # Wait for disconnect
