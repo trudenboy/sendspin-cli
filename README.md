@@ -10,7 +10,8 @@ Sendspin CLI includes three apps:
 - **`sendspin daemon`** - Background daemon for headless devices
 - **`sendspin serve`** - Host a Sendspin party to demo Sendspin
 
-<img width="1144" height="352" alt="image" src="https://github.com/user-attachments/assets/5a649bde-76f6-486f-b3aa-0af5e49e0ac7" />
+<img width="1238" height="634" alt="Screenshot of the Sendspin terminal player" src="https://github.com/user-attachments/assets/2332a283-1994-4847-9265-4014f46abc56" />
+
 
 [![A project from the Open Home Foundation](https://www.openhomefoundation.org/badges/ohf-project.png)](https://www.openhomefoundation.org/)
 
