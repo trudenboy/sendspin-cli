@@ -6,9 +6,9 @@ Connect to any [Sendspin](https://www.sendspin-audio.com) server and instantly t
 
 Sendspin CLI includes three apps:
 
-- **`sendspin`** - Terminal client for interactive use
-- **`sendspin daemon`** - Background daemon for headless devices
-- **`sendspin serve`** - Host a Sendspin party to demo Sendspin
+- **[`sendspin`](#quick-start)** - Terminal client for interactive use
+- **[`sendspin daemon`](#daemon-mode)** - Background daemon for headless devices
+- **[`sendspin serve`](#sendspin-party)** - Host a Sendspin party to demo Sendspin
 
 <img width="1238" height="634" alt="Screenshot of the Sendspin terminal player" src="https://github.com/user-attachments/assets/2332a283-1994-4847-9265-4014f46abc56" />
 
