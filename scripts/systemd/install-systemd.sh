@@ -140,6 +140,11 @@ elif [ "$USE_DEDICATED_USER" = true ]; then
     echo -e "${D}User 'sendspin' already exists${N}"
 fi
 
+# Enable linger so the user's systemd session (and PipeWire/PulseAudio) starts
+# at boot without requiring an interactive login
+loginctl enable-linger "$DAEMON_USER" 2>/dev/null || true
+echo -e "${G}✓${N} Linger enabled for $DAEMON_USER"
+
 echo -e "${D}Daemon will run as: ${B}$DAEMON_USER${N}"
 
 # Detect package manager
@@ -192,6 +197,7 @@ echo -e "\n${C}Installing Sendspin...${N}"
 if sudo -u "$DAEMON_USER" bash -l -c "uv tool list" 2>/dev/null | grep -q "^sendspin "; then
     echo -e "${D}Sendspin already installed, upgrading...${N}"
     sudo -u "$DAEMON_USER" bash -l -c "uv tool upgrade sendspin" || { echo -e "${R}Failed${N}"; exit 1; }
+    echo -e "  ${C}Release notes:${N} https://github.com/Sendspin/sendspin-cli/releases"
 else
     sudo -u "$DAEMON_USER" bash -l -c "uv tool install sendspin" || { echo -e "${R}Failed${N}"; exit 1; }
 fi
@@ -207,84 +213,62 @@ generate_client_id() {
     echo "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g' | sed 's/^-\+\|-\+$//g'
 }
 
-# Load old config if it exists (for migration)
-OLD_CONFIG="/etc/default/sendspin"
-OLD_NAME=""
-OLD_DEVICE=""
-OLD_DELAY="0"
-
-if [ -f "$OLD_CONFIG" ]; then
-    echo -e "\n${C}Found existing config, migrating...${N}"
-    # Source the old config to get values
-    source "$OLD_CONFIG"
-    OLD_NAME="$SENDSPIN_CLIENT_NAME"
-    OLD_DEVICE="$SENDSPIN_AUDIO_DEVICE"
-    OLD_DELAY="${SENDSPIN_STATIC_DELAY_MS:-0}"
-fi
-
-# Configure
-echo -e "\n${C}Configuration${N}"
-NAME=$(prompt_input "Client name" "${OLD_NAME:-$(hostname)}")
-DEFAULT_CLIENT_ID=$(generate_client_id "$NAME")
-CLIENT_ID=$(prompt_input "Client ID" "$DEFAULT_CLIENT_ID")
-
-echo -e "\n${C}Audio Devices${N}"
-# List audio devices - try to detect session environment for accuracy
-DAEMON_USER_UID=$(id -u "$DAEMON_USER")
-DAEMON_RUNTIME_DIR="/run/user/$DAEMON_USER_UID"
-DAEMON_DBUS=""
-
-# Try to get DBUS address from user's session (or current session for dedicated user)
-if [ -d "$DAEMON_RUNTIME_DIR" ]; then
-    DAEMON_DBUS=$(ps -u "$DAEMON_USER" e | grep -m1 'DBUS_SESSION_BUS_ADDRESS=' | sed 's/.*DBUS_SESSION_BUS_ADDRESS=\([^ ]*\).*/\1/' || true)
-    [ -z "$DAEMON_DBUS" ] && DAEMON_DBUS="unix:path=$DAEMON_RUNTIME_DIR/bus"
-fi
-
-# Run with environment variables if available
-if [ -n "$DAEMON_DBUS" ]; then
-    sudo -u "$DAEMON_USER" env XDG_RUNTIME_DIR="$DAEMON_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DAEMON_DBUS" "$SENDSPIN_BIN" --list-audio-devices 2>&1 | head -n -2
-else
-    sudo -u "$DAEMON_USER" "$SENDSPIN_BIN" --list-audio-devices 2>&1 | head -n -2 || echo -e "${D}(Audio devices will be detected when daemon starts)${N}"
-fi
-
-DEVICE=$(prompt_input "Audio device" "${OLD_DEVICE:-default}")
-[ "$DEVICE" = "default" ] && DEVICE=""
-
-# MPRIS disabled by default (user can enable manually in config if needed)
-USE_MPRIS=false
-
-# Create config directory
+# Paths for current JSON config
 CONFIG_DIR="$DAEMON_HOME/.config/sendspin"
 CONFIG_FILE="$CONFIG_DIR/settings-daemon.json"
-sudo -u "$DAEMON_USER" mkdir -p "$CONFIG_DIR"
 
-# Save config in new JSON format
-# Create JSON with conditional fields (null if empty)
-DEVICE_JSON="null"
-[ -n "$DEVICE" ] && DEVICE_JSON="\"$DEVICE\""
+# Detect runtime dir/UID for audio device listing and service file
+DAEMON_USER_UID=$(id -u "$DAEMON_USER")
+DAEMON_RUNTIME_DIR="/run/user/$DAEMON_USER_UID"
 
-# Use old delay value if it was set
-DELAY_VALUE="${OLD_DELAY:-0.0}"
+if [ -f "$CONFIG_FILE" ]; then
+    echo -e "\n${G}✓${N} Existing config detected at ${B}$CONFIG_FILE${N} — keeping it as-is."
+else
+    # No existing config — prompt and create one
+    echo -e "\n${C}Configuration${N}"
+    NAME=$(prompt_input "Client friendly name (shown in the UI)" "$(hostname)")
+    DEFAULT_CLIENT_ID="$(generate_client_id "$NAME")"
+    CLIENT_ID=$(prompt_input "Client ID (used in settings and scripts)" "$DEFAULT_CLIENT_ID")
 
-sudo -u "$DAEMON_USER" tee "$CONFIG_FILE" > /dev/null << EOF
+    echo -e "\n${C}Audio Devices${N}"
+    # List audio devices - try to detect session environment for accuracy
+    DAEMON_DBUS=""
+    if [ -d "$DAEMON_RUNTIME_DIR" ]; then
+        DAEMON_DBUS=$(ps -u "$DAEMON_USER" e | grep -m1 'DBUS_SESSION_BUS_ADDRESS=' | sed 's/.*DBUS_SESSION_BUS_ADDRESS=\([^ ]*\).*/\1/' || true)
+        [ -z "$DAEMON_DBUS" ] && DAEMON_DBUS="unix:path=$DAEMON_RUNTIME_DIR/bus"
+    fi
+
+    if [ -n "$DAEMON_DBUS" ]; then
+        sudo -u "$DAEMON_USER" env XDG_RUNTIME_DIR="$DAEMON_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DAEMON_DBUS" "$SENDSPIN_BIN" --list-audio-devices 2>&1 | head -n -2
+    else
+        sudo -u "$DAEMON_USER" "$SENDSPIN_BIN" --list-audio-devices 2>&1 | head -n -2 || echo -e "${D}(Audio devices will be detected when daemon starts)${N}"
+    fi
+
+    DEVICE=$(prompt_input "Audio device" "default")
+    [ "$DEVICE" = "default" ] && DEVICE=""
+
+    # Create config directory and write only the prompted settings;
+    # all other options are omitted so the daemon uses its built-in defaults.
+    sudo -u "$DAEMON_USER" mkdir -p "$CONFIG_DIR"
+
+    if [ -n "$DEVICE" ]; then
+        sudo -u "$DAEMON_USER" tee "$CONFIG_FILE" > /dev/null << EOF
 {
   "name": "$NAME",
-  "log_level": null,
-  "listen_port": null,
-  "player_volume": 25,
-  "player_muted": false,
-  "static_delay_ms": $DELAY_VALUE,
-  "last_server_url": null,
   "client_id": "$CLIENT_ID",
-  "audio_device": $DEVICE_JSON,
-  "use_mpris": $USE_MPRIS
+  "audio_device": "$DEVICE"
 }
 EOF
+    else
+        sudo -u "$DAEMON_USER" tee "$CONFIG_FILE" > /dev/null << EOF
+{
+  "name": "$NAME",
+  "client_id": "$CLIENT_ID"
+}
+EOF
+    fi
 
-# Clean up old config file if it exists
-if [ -f "$OLD_CONFIG" ]; then
-    echo -e "${G}✓${N} Migrated config, removing old file"
-    rm -f "$OLD_CONFIG"
+    echo -e "${G}✓${N} Config written to $CONFIG_FILE"
 fi
 
 # Check if service is currently running (to determine if we need to restart)
@@ -306,6 +290,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=$DAEMON_USER
+Environment=XDG_RUNTIME_DIR=/run/user/$DAEMON_USER_UID
 ExecStart=$SENDSPIN_BIN daemon
 Restart=on-failure
 RestartSec=10
