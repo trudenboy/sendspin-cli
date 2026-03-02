@@ -13,6 +13,7 @@ from aiosendspin.client import ClientListener, SendspinClient
 from aiosendspin.models.core import (
     ClientGoodbyeMessage,
     ClientGoodbyePayload,
+    GroupUpdateServerPayload,
     ServerCommandPayload,
 )
 from aiosendspin.models.player import ClientHelloPlayerSupport, SupportedAudioFormat
@@ -176,6 +177,7 @@ class SendspinDaemon:
         self._audio_handler.attach_client(self._client)
         self._server_url = self._args.url
         self._client.add_server_command_listener(self._handle_server_command)
+        self._client.add_group_update_listener(self._handle_group_update)
         await self._connection_loop(self._args.url)
 
     async def _run_server_initiated(self, static_delay_ms: float) -> None:
@@ -238,6 +240,7 @@ class SendspinDaemon:
             self._client = client
             self._audio_handler.attach_client(client)
             client.add_server_command_listener(self._handle_server_command)
+            client.add_group_update_listener(self._handle_group_update)
             if MPRIS_AVAILABLE and self._args.use_mpris:
                 self._mpris = SendspinMpris(client)
                 self._mpris.start()
@@ -325,6 +328,12 @@ class SendspinDaemon:
         elif player_cmd.command == PlayerCommand.MUTE and player_cmd.mute is not None:
             self._audio_handler.set_volume(self._settings.player_volume, muted=player_cmd.mute)
             logger.info("Server %s player", "muted" if player_cmd.mute else "unmuted")
+
+    def _handle_group_update(self, payload: GroupUpdateServerPayload) -> None:
+        """Log group membership changes so integrations can track group state."""
+        if payload.group_id is not None:
+            logger.info("Group ID: %s", payload.group_id)
+        logger.info("Group name: %s", payload.group_name or "")
 
     def _handle_format_change(
         self, codec: str | None, sample_rate: int, bit_depth: int, channels: int
