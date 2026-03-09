@@ -540,7 +540,8 @@ class AudioPlayer:
         self._last_output_frame = b""
         self._sync_error_filter.reset()
         self._sync_error_filtered_us = 0.0
-        self._last_reanchor_loop_time_us = 0
+        # Preserve reanchor cooldown timer — resetting it would defeat the
+        # 5-second cooldown and allow immediate back-to-back re-anchors.
         self._last_sync_error_log_us = 0
         self._frames_inserted_since_log = 0
         self._frames_dropped_since_log = 0
